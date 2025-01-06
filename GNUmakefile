@@ -1,3 +1,4 @@
+MAKEFLAGS += --jobs=1
 
 -include config.unix
 
@@ -23,7 +24,7 @@ all: build
 # Base build
 # ----------------------------------------
 
-build: luarocks luarocks-admin $(builddir)/luarocks $(builddir)/luarocks-admin
+build: config.unix $(builddir)/config-$(LUA_VERSION).lua $(builddir)/luarocks $(builddir)/luarocks-admin
 
 config.unix:
 	@echo Please run the "./configure" script before building.
@@ -134,7 +135,7 @@ uninstall:
 # ----------------------------------------
 
 install-binary: binary install-config
-	mkdir -p "$(buildbinarydir)"
+	mkdir -p '$(DESTDIR)$(bindir)/'
 	$(INSTALL) "$(buildbinarydir)/luarocks.exe" "$(DESTDIR)$(bindir)/luarocks"
 	$(INSTALL) "$(buildbinarydir)/luarocks-admin.exe" "$(DESTDIR)$(bindir)/luarocks-admin"
 	mkdir -p '$(DESTDIR)$(luadir)/luarocks/core'

@@ -63,16 +63,15 @@ describe("luarocks.fs #unit", function()
 
    local runner
 
-   setup(function()
+   lazy_setup(function()
       cfg.init()
       fs.init()
       runner = require("luacov.runner")
       runner.init(testing_paths.testrun_dir .. "/luacov.config")
-      runner.tick = true
    end)
 
-   teardown(function()
-      runner.shutdown()
+   lazy_teardown(function()
+      runner.save_stats()
    end)
 
    describe("fs.Q", function()
@@ -1064,9 +1063,9 @@ describe("luarocks.fs #unit", function()
          end
          assert.same(count, 3)
          assert.is_not.same(contents[tmpdir], true)
-         assert.same(contents["intfile1"], true)
-         assert.same(contents["intdir"], true)
-         assert.same(contents["intdir/intfile2"], true)
+         assert.same(contents[P"intfile1"], true)
+         assert.same(contents[P"intdir"], true)
+         assert.same(contents[P"intdir/intfile2"], true)
       end)
 
       it("uses the current working directory if the argument is nil", function()
@@ -1539,6 +1538,57 @@ describe("luarocks.fs #unit", function()
          assert.same(tonumber("0000", 8), fs._unix_rwx_to_number("rwxrwxrwx", true))
          assert.same(tonumber("0077", 8), fs._unix_rwx_to_number("rwx------", true))
          assert.same(tonumber("0177", 8), fs._unix_rwx_to_number("rw-------", true))
+      end)
+   end)
+
+   describe("fs.execute_env", function()
+      local tmpname
+      local tmplua
+      local LUA = "lua"
+
+      local function readfile(pathname)
+         local file = assert(io.open(pathname, "rb"))
+         local data = file:read "*a"
+         file:close()
+         return data
+      end
+
+      lazy_setup(function()
+         tmpname = os.tmpname()
+
+         tmplua = os.tmpname()
+         local f = assert(io.open(tmplua, 'wb'))
+         f:write [[
+            local out = io.open((...), 'wb')
+            out:write(os.getenv 'FOO')
+            out:close()
+         ]]
+         f:close()
+         LUA = test_env.testing_paths.lua
+      end)
+
+      after_each(function()
+         os.remove(tmpname)
+      end)
+
+      lazy_teardown(function()
+         os.remove(tmpname)
+      end)
+
+      it("passes variables w/o spaces correctly", function()
+         fs.execute_env({
+            FOO = "BAR",
+         }, LUA, tmplua, tmpname)
+         local data = readfile(tmpname)
+         assert.same("BAR", data)
+      end)
+
+      it("passes variables w/ spaces correctly", function()
+         fs.execute_env({
+            FOO = "BAR with spaces",
+         }, LUA, tmplua, tmpname)
+         local data = readfile(tmpname)
+         assert.same("BAR with spaces", data)
       end)
    end)
 

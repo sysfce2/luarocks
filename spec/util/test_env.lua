@@ -118,6 +118,16 @@ os.rename = function(a, b) -- luacheck: ignore
    return os_rename(V(a), V(b))
 end
 
+-- Monkeypatch incorrect tmpname's on some Lua distributions for Windows
+local os_tmpname = os.tmpname
+os.tmpname = function() -- luacheck:ignore
+   local name = os_tmpname()
+   if name:sub(1, 1) == '\\' then
+      name = os.getenv "TEMP"..name
+   end
+   return name
+end
+
 local lfs_chdir = lfs.chdir
 lfs.chdir = function(d) -- luacheck: ignore
    return lfs_chdir(V(d))
@@ -207,13 +217,16 @@ function test_env.run_in_tmp(f, finally)
    end
    fs.change_dir(tmpdir)
 
-   if finally then
-      finally(function()
-         lfs.chdir(olddir)
-         lfs.rmdir(tmpdir)
-         fs.change_dir(olddir)
-      end)
-   end
+   local lr_config = test_env.env_variables.LUAROCKS_CONFIG
+
+   test_env.copy(lr_config, lr_config .. ".bak")
+
+   finally(function()
+      test_env.copy(lr_config .. ".bak", lr_config)
+      lfs.chdir(olddir)
+      lfs.rmdir(tmpdir)
+      fs.change_dir(olddir)
+   end)
 
    f(tmpdir)
 end
@@ -378,8 +391,19 @@ function test_env.set_args()
          elseif system == "Darwin" then
             test_env.TEST_TARGET_OS = "osx"
             if test_env.CI then
-               test_env.OPENSSL_INCDIR = "/usr/local/opt/openssl/include"
-               test_env.OPENSSL_LIBDIR = "/usr/local/opt/openssl/lib"
+               if exists("/opt/homebrew/opt/openssl@3/include") then
+                  test_env.OPENSSL_INCDIR = "/opt/homebrew/opt/openssl@3/include"
+                  test_env.OPENSSL_LIBDIR = "/opt/homebrew/opt/openssl@3/lib"
+               elseif exists("/opt/homebrew/opt/openssl@1.1/include") then
+                  test_env.OPENSSL_INCDIR = "/opt/homebrew/opt/openssl@1.1/include"
+                  test_env.OPENSSL_LIBDIR = "/opt/homebrew/opt/openssl@1.1/lib"
+               elseif exists("/opt/homebrew/opt/openssl/include") then
+                  test_env.OPENSSL_INCDIR = "/opt/homebrew/opt/openssl/include"
+                  test_env.OPENSSL_LIBDIR = "/opt/homebrew/opt/openssl/lib"
+               else
+                  test_env.OPENSSL_INCDIR = "/usr/local/opt/openssl/include"
+                  test_env.OPENSSL_LIBDIR = "/usr/local/opt/openssl/lib"
+               end
             end
          end
       end
@@ -514,28 +538,13 @@ end
 function test_env.write_file(pathname, str, finally)
    pathname = V(pathname)
 
-   local file = assert(io.open(pathname, "w"))
+   local file = assert(io.open(pathname, "wb"))
    file:write(str)
    file:close()
    if finally then
       finally(function()
          os.remove(pathname)
       end)
-   end
-end
-
---- Create md5sum of directory structure recursively, based on filename and size
--- @param path string: path to directory for generate md5sum
--- @return md5sum string: md5sum of directory
-local function hash_environment(path)
-   if test_env.TEST_TARGET_OS == "linux" then
-      return execute_output(C("cd", path, "&& find . -printf \"%s %p\n\" | md5sum"))
-   elseif test_env.TEST_TARGET_OS == "osx" then
-      return execute_output(C("find", path, "-type f -exec stat -f \"%z %N\" {} \\; | md5"))
-   elseif test_env.TEST_TARGET_OS == "windows" then
-      return execute_output(
-         "\"" .. C(tool("find"), Q(path), "-printf", "\"%s %p\"") .. "\"" ..
-         " > temp_sum.txt && certUtil -hashfile temp_sum.txt && del temp_sum.txt")
    end
 end
 
@@ -548,6 +557,7 @@ local function create_env(testing_paths)
    local lrprefix = testing_paths.testing_lrprefix
    local tree = testing_paths.testing_tree
    local sys_tree = testing_paths.testing_sys_tree
+   local deps_tree = testing_paths.testing_deps_tree
 
    if test_env.LUAJIT_V then
       lua_v="5.1"
@@ -564,36 +574,29 @@ local function create_env(testing_paths)
    else
       table.insert(lua_path, dir_path(lrprefix, "share", "lua", lua_v, "?.lua"))
    end
-   table.insert(lua_path, dir_path(tree,     "share", "lua", lua_v, "?.lua"))
-   table.insert(lua_path, dir_path(tree,     "share", "lua", lua_v, "?", "init.lua"))
-   table.insert(lua_path, dir_path(sys_tree, "share", "lua", lua_v, "?.lua"))
-   table.insert(lua_path, dir_path(sys_tree, "share", "lua", lua_v, "?", "init.lua"))
+   table.insert(lua_path, dir_path(tree,      "share", "lua", lua_v, "?.lua"))
+   table.insert(lua_path, dir_path(tree,      "share", "lua", lua_v, "?", "init.lua"))
+   table.insert(lua_path, dir_path(sys_tree,  "share", "lua", lua_v, "?.lua"))
+   table.insert(lua_path, dir_path(sys_tree,  "share", "lua", lua_v, "?", "init.lua"))
+   table.insert(lua_path, dir_path(deps_tree, "share", "lua", lua_v, "?.lua"))
+   table.insert(lua_path, dir_path(deps_tree, "share", "lua", lua_v, "?", "init.lua"))
    table.insert(lua_path, dir_path(testing_paths.src_dir, "?.lua"))
    env_variables.LUA_PATH = table.concat(lua_path, ";") .. ";"
 
    local lua_cpath = {}
    local lib_pattern = "?." .. test_env.lib_extension
-   table.insert(lua_cpath, dir_path(tree,     "lib", "lua", lua_v, lib_pattern))
-   table.insert(lua_cpath, dir_path(sys_tree, "lib", "lua", lua_v, lib_pattern))
+   table.insert(lua_cpath, dir_path(tree,      "lib", "lua", lua_v, lib_pattern))
+   table.insert(lua_cpath, dir_path(sys_tree,  "lib", "lua", lua_v, lib_pattern))
+   table.insert(lua_cpath, dir_path(deps_tree, "lib", "lua", lua_v, lib_pattern))
    env_variables.LUA_CPATH = table.concat(lua_cpath, ";") .. ";"
 
    local path = { os.getenv("PATH") }
    table.insert(path, dir_path(tree, "bin"))
    table.insert(path, dir_path(sys_tree, "bin"))
+   table.insert(path, dir_path(deps_tree, "bin"))
    env_variables.PATH = table.concat(path, test_env.TARGET_OS == "windows" and ";" or ":")
 
    return env_variables
-end
-
---- Create md5sums of origin system and system-copy testing directory
--- @param testing_paths table: table with paths to testing directory
--- @return md5sums table: table of md5sums of system and system-copy testing directory
-local function create_md5sums(testing_paths)
-   local md5sums = {}
-   md5sums.testing_tree_copy_md5 = hash_environment(testing_paths.testing_tree_copy)
-   md5sums.testing_sys_tree_copy_md5 = hash_environment(testing_paths.testing_sys_tree_copy)
-
-   return md5sums
 end
 
 local function make_run_function(cmd_name, exec_function, with_coverage, do_print)
@@ -660,42 +663,22 @@ local function build_environment(rocks, env_variables)
    local testing_paths = test_env.testing_paths
    test_env.remove_dir(testing_paths.testing_tree)
    test_env.remove_dir(testing_paths.testing_sys_tree)
-   test_env.remove_dir(testing_paths.testing_tree_copy)
-   test_env.remove_dir(testing_paths.testing_sys_tree_copy)
 
    lfs.mkdir(testing_paths.testing_tree)
    lfs.mkdir(testing_paths.testing_sys_tree)
+   lfs.mkdir(testing_paths.testing_deps_tree)
 
    test_env.run.luarocks_admin_nocov(C("make_manifest", Q(testing_paths.testing_server)))
    test_env.run.luarocks_admin_nocov(C("make_manifest", Q(testing_paths.testing_cache)))
 
    for _, rock in ipairs(rocks) do
       local only_server = "--only-server=" .. testing_paths.testing_cache
-      local tree = "--tree=" .. testing_paths.testing_sys_tree
+      local tree = "--tree=" .. testing_paths.testing_deps_tree
       if not test_env.run.luarocks_nocov(test_env.quiet(C("install", only_server, tree, Q(rock)), env_variables)) then
          assert(test_env.run.luarocks_nocov(C("build", tree, Q(rock)), env_variables))
          assert(test_env.run.luarocks_nocov(C("pack", tree, Q(rock)), env_variables))
          move_file(rock .. "-*.rock", testing_paths.testing_cache)
       end
-   end
-
-   test_env.copy_dir(testing_paths.testing_tree, testing_paths.testing_tree_copy)
-   test_env.copy_dir(testing_paths.testing_sys_tree, testing_paths.testing_sys_tree_copy)
-end
-
---- Reset testing environment
-local function reset_environment(testing_paths, md5sums)
-   local testing_tree_md5 = hash_environment(testing_paths.testing_tree)
-   local testing_sys_tree_md5 = hash_environment(testing_paths.testing_sys_tree)
-
-   if testing_tree_md5 ~= md5sums.testing_tree_copy_md5 then
-      test_env.remove_dir(testing_paths.testing_tree)
-      test_env.copy_dir(testing_paths.testing_tree_copy, testing_paths.testing_tree)
-   end
-
-   if testing_sys_tree_md5 ~= md5sums.testing_sys_tree_copy_md5 then
-      test_env.remove_dir(testing_paths.testing_sys_tree)
-      test_env.copy_dir(testing_paths.testing_sys_tree_copy, testing_paths.testing_sys_tree)
    end
 end
 
@@ -762,15 +745,15 @@ local function create_testing_paths(suffix)
    paths.testrun_dir           = testrun_dir
    paths.testing_lrprefix      = dir_path(testrun_dir, "testing_lrprefix-" .. suffix)
    paths.testing_tree          = dir_path(testrun_dir, "testing-" .. suffix)
-   paths.testing_tree_copy     = dir_path(testrun_dir, "testing_copy-" .. suffix)
    paths.testing_sys_tree      = dir_path(testrun_dir, "testing_sys-" .. suffix)
-   paths.testing_sys_tree_copy = dir_path(testrun_dir, "testing_sys_copy-" .. suffix)
+   paths.testing_deps_tree     = dir_path(testrun_dir, "testing_deps-" .. suffix)
    paths.testing_cache         = dir_path(testrun_dir, "testing_cache-" .. suffix)
    paths.testing_server        = dir_path(testrun_dir, "testing_server-" .. suffix)
 
    local rocks_v = "rocks-" .. test_env.lua_version
-   paths.testing_rocks     = dir_path(paths.testing_tree,     "lib", "luarocks", rocks_v)
-   paths.testing_sys_rocks = dir_path(paths.testing_sys_tree, "lib", "luarocks", rocks_v)
+   paths.testing_rocks      = dir_path(paths.testing_tree,      "lib", "luarocks", rocks_v)
+   paths.testing_sys_rocks  = dir_path(paths.testing_sys_tree,  "lib", "luarocks", rocks_v)
+   paths.testing_deps_rocks = dir_path(paths.testing_deps_tree, "lib", "luarocks", rocks_v)
 
    if test_env.TEST_TARGET_OS == "windows" then
       paths.luarocks_tmp = os.getenv("TEMP")
@@ -850,7 +833,8 @@ local function create_configs()
    -- testing_config_no_downloader.lua
    local config_content = substitute([[
       rocks_trees = {
-         "%{testing_tree}",
+         { name = "user", root = "%{testing_tree}" },
+         { name = "deps", root = "%{testing_deps_tree}" },
          { name = "system", root = "%{testing_sys_tree}" },
       }
       rocks_servers = {
@@ -867,6 +851,7 @@ local function create_configs()
    ]], {
       user = "testuser",
       testing_sys_tree = test_env.testing_paths.testing_sys_tree,
+      testing_deps_tree = test_env.testing_paths.testing_deps_tree,
       testing_tree = test_env.testing_paths.testing_tree,
       testing_server = test_env.testing_paths.testing_server,
       testing_cache = test_env.testing_paths.testing_cache
@@ -882,6 +867,7 @@ local function create_configs()
    config_content = substitute([[
       rocks_trees = {
          "%{testing_tree}",
+         "%{testing_deps_tree}",
          "%{testing_sys_tree}",
       }
       local_cache = "%{testing_cache}"
@@ -895,6 +881,7 @@ local function create_configs()
    ]], {
       user = "testuser",
       testing_sys_tree = test_env.testing_paths.testing_sys_tree,
+      testing_deps_tree = test_env.testing_paths.testing_deps_tree,
       testing_tree = test_env.testing_paths.testing_tree,
       testing_cache = test_env.testing_paths.testing_cache
    })
@@ -906,6 +893,9 @@ local function create_configs()
       return {
          statsfile = "%{statsfile}",
          reportfile = "%{reportfile}",
+         exclude = {
+            "src%/luarocks%/vendor.+$",
+         },
          modules = {
             ["luarocks"] = "%{luarocks_path}",
             ["luarocks-admin"] = "%{luarocks_admin_path}",
@@ -1101,7 +1091,6 @@ function test_env.main()
    if test_env.TYPE_TEST_ENV == "full" then
       table.insert(urls, "/luafilesystem-${LUAFILESYSTEM}.src.rock")
       table.insert(urls, "/luasocket-${LUASOCKET}.src.rock")
-      table.insert(urls, "/luasocket-${LUASOCKET}.rockspec")
       table.insert(urls, "/luasec-${LUASEC}.src.rock")
       table.insert(urls, "/md5-1.2-1.src.rock")
       table.insert(urls, "/manifests/hisham/lua-zlib-1.2-0.src.rock")
@@ -1120,12 +1109,14 @@ function test_env.main()
    end
 
    -- luacov is needed for both minimal or full environment
-   table.insert(urls, "/luacov-${LUACOV}.rockspec")
    table.insert(urls, "/luacov-${LUACOV}.src.rock")
-   table.insert(urls, "/cluacov-${CLUACOV}.rockspec")
    table.insert(urls, "/cluacov-${CLUACOV}.src.rock")
    table.insert(rocks, "luacov")
    table.insert(rocks, "cluacov")
+
+   -- compat53 is needed
+   table.insert(urls, "/compat53-${COMPAT53}.src.rock")
+   table.insert(rocks, "compat53")
 
    -- Download rocks needed for LuaRocks testing environment
    lfs.mkdir(testing_paths.testing_server)
@@ -1134,7 +1125,7 @@ function test_env.main()
    build_environment(rocks, env_vars)
 end
 
---- Function for initial setup of environment, variables, md5sums for spec files
+--- Function for initial setup of environment and variables
 function test_env.setup_specs(extra_rocks, use_mock)
    test_env.unload_luarocks()
 
@@ -1163,7 +1154,6 @@ function test_env.setup_specs(extra_rocks, use_mock)
 
       test_env.platform = get_luarocks_platform(test_env.env_variables)
       test_env.wrapper_extension = test_env.TEST_TARGET_OS == "windows" and ".bat" or ""
-      test_env.md5sums = create_md5sums(test_env.testing_paths)
       test_env.setup_done = true
       title("RUNNING TESTS")
    end
@@ -1180,7 +1170,8 @@ function test_env.setup_specs(extra_rocks, use_mock)
    end
 
    if test_env.RESET_ENV then
-      reset_environment(test_env.testing_paths, test_env.md5sums, variables)
+      test_env.remove_dir(test_env.testing_paths.testing_tree)
+      test_env.remove_dir(test_env.testing_paths.testing_sys_tree)
    end
 
    lfs.chdir(testrun_dir)

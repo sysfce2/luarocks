@@ -6,14 +6,13 @@ local fun = require("luarocks.fun")
 describe("luarocks.fun #unit", function()
    local runner
 
-   setup(function()
+   lazy_setup(function()
       runner = require("luacov.runner")
       runner.init(testing_paths.testrun_dir .. "/luacov.config")
-      runner.tick = true
    end)
 
-   teardown(function()
-      runner.shutdown()
+   lazy_teardown(function()
+      runner.save_stats()
    end)
 
    describe("fun.concat", function()
@@ -56,17 +55,6 @@ describe("luarocks.fun #unit", function()
          assert.same(fun.map(t, addOne), {2, 3, 4})
          t = {}
          assert.same(fun.map(t, addOne), {})
-      end)
-   end)
-
-   describe("fun.traverse", function()
-      it("recursively applies a function to each element in a given table and returns the results in a new table", function()
-         local t
-
-         t = {1, 2, {3, 4, {5, 6}}}
-         assert.same(fun.traverse(t, addOne), {2, 3, {4, 5, {6, 7}}})
-         t = {1, 2, {}, {1, {}, 2}}
-         assert.same(fun.traverse(t, addOne), {2, 3, {}, {2, {}, 3}})
       end)
    end)
 

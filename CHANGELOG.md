@@ -1,3 +1,122 @@
+## What's new in LuaRocks 3.11.1
+
+* Fixes:
+  * normalize namespace names to lowercase when performing
+    dependency resolution, to match CLI behavior
+  * `luarocks build`: ensure `--force` works
+  * `luarocks init`: check if we can create .gitignore
+  * Unix: honor umask correctly
+  * Fix error when failing to open cached files
+  * Fix behavior of luarocks.lock file when dealing
+    with dependencies
+
+## What's new in LuaRocks 3.11.0
+
+* Features:
+  * `luarocks build` and `luarocks install` no longer rebuild
+    or reinstall if the version is already installed
+    (`--force` overrides).
+  * More aggressive caching of the manifest file (does not
+    hit `luarocks.org` again if the cached manifest is younger
+    than 10 seconds).
+  * Drops stale lock files (older than 1 hour).
+  * More informative error reports on bad configurations of
+    Lua paths (`LUA_INCDIR`, `LUA_LIBDIR`).
+  * Better error messages when lacking permissions.
+  * Bumps vendored dkjson dependency to 2.7.
+  * `--verbose` output now prints the LuaRocks configuration,
+    for more informative bug reports.
+* Fixes:
+  * Passing `--global` always LuaRocks target the system tree.
+  * Does not crash if `root_dir` is a table.
+  * Does not try to lock rocks trees when using `--pack-binary-rock`
+    or `--no-install`.
+  * Checks permissions ahead of trying to lock trees,
+    to provide better error messages.
+  * Avoids LuaSec version mismatch by refusing to use LuaSec
+    versions below 1.1.
+  * Does not set up a "project environment" when running
+    `make` on the LuaRocks sources.
+  * Windows:
+    * Avoid excessive calls to `icacls`, resulting in
+      performance improvements.
+    * Parses slashes correctly when reading a rock's `rock_manifest`.
+    * Fix setting of environment variables.
+    * install.bat sets LUALIB.
+    * Improved help for `luarocks path`.
+
+## What's new in LuaRocks 3.10.0
+
+* Features:
+  * Introduce file-based locking for concurrent access
+    control. Previously, LuaRocks would produce undefined behavior
+    when running two instances at the same time.
+  * Rockspec quality-of-life improvements:
+    * Using an unknown `build.type` now automatically
+      implies a build dependency for `luarocks-build-<build.type>`.
+    * Improve `rockspec.source.dir` autodetection.
+    * `builtin` build mode now automatically inherits include
+      and libdirs from `external_dependencies` if not set
+      explicitly.
+  * improved and simplified Lua interpreter search.
+    * `lua_interpreter` config value is deprecated in favor
+      of `variables.LUA` which contains the full interpreter path.
+  * `luarocks-admin remove` now supports the `file://`
+    protocol for managing local rocks servers.
+  * Bundled dkjson library, so that `luarocks upload` does not
+    require an external JSON library.
+  * New flags for `luarocks init`: `--no-gitignore`,
+    `--no-wrapper-scripts`, `--wrapper-dir`.
+  * `luarocks config` now attempts updating the system config
+    by default when `local_by_default` is `false`.
+  * New flag for `luarocks path`: `--full`, for use with
+    `--lr-path` and `--lr-cpath`.
+* Fixes:
+  * various Windows-specific fixes:
+    * `build.install_command` now works correctly on Windows.
+    * do not attempt to set "executable" permissions for folders
+      on Windows.
+    * better handling of Windows backslash paths.
+    * fix program search when using absolute paths and `.exe` files.
+    * improved lookup order for library dependencies.
+    * `LUALIB` filename detection is now done dynamically at
+      runtime and not hardcoded by the Windows installer.
+    * prevent LuaRocks from blocking `luafilesystem` from being
+      removed on Windows.
+  * `luarocks build` no longer looks for Lua headers when installing
+    pure-Lua rocks.
+  * `luarocks build` table in rockspecs now gets some additional validation
+    to prevent crashes on malformed rockspecs.
+  * `build.builtin` now compiles C modules in a temporary directory,
+    avoiding name clashes
+  * `build_dependencies` now correctly installs dependencies
+    for the Lua version that LuaRocks is running on, and not
+    the one it is building for with `--lua-version`.
+  * `build_dependencies` can now use a dependency available
+    in any rocks tree (system, user, project).
+  * `luarocks config` now prints boolean values correctly on Lua 5.1.
+  * `luarocks config` now ensures the target directory exists when saving
+    a configuration.
+  * `luarocks init` now injects the project's `package.(c)path` in the
+    Lua wrapper.
+  * `luarocks lint` no longer crashes if a rockspec misses a `description` field.
+  * `luarocks test` now handles malformed `command` entries gracefully.
+  * if `--lua-*` flags are given in the CLI, the hardcoded values
+    are never used.
+  * the "no downloader" error is now shown only once, and not
+    once per failed mirror.
+  * project dir is always presented normalized
+  * catch the failure to setup `LUA_BINDIR` early.
+  * when using `--pack-binary-rock` and a `zip` program is
+    unavailable, report that instead of failing cryptically.
+  * More graceful handling when failing to create a local cache.
+  * Avoid confusion with macOS multiarch binaries on system detection.
+  * Add `--tree` to the rocks trees list.
+  * Better support for LuaJIT versions with extra
+    suffixes in their version numbers.
+  * Don't use floats to parse Lua version number.
+  * Various fixes related to path normalization.
+
 ## What's new in LuaRocks 3.9.2
 
 * Configuration now honors typical compiler environment variables

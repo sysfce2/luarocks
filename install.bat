@@ -6,7 +6,7 @@ local vars = {}
 
 
 vars.PREFIX = nil
-vars.VERSION = "3.10"
+vars.VERSION = "3.0"
 vars.SYSCONFDIR = nil
 vars.CONFBACKUPDIR = nil
 vars.SYSCONFFILENAME = nil
@@ -21,7 +21,7 @@ vars.LUA_DIR = nil
 vars.LUA_BINDIR = nil
 vars.LUA_INCDIR = nil
 vars.LUA_LIBDIR = nil
-vars.LUA_LIBNAME = nil
+vars.LUALIB = nil
 vars.LUA_VERSION = "5.1"
 vars.LUA_SHORTV = nil   -- "51"
 vars.LUA_RUNTIME = nil
@@ -344,7 +344,7 @@ local function look_for_link_libraries(directory)
 	if vars.LUA_LIBDIR then
 		directories = {vars.LUA_LIBDIR}
 	else
-		directories = {directory, directory .. "\\lib", directory .. "\\bin"}
+		directories = {directory, directory .. "\\bin", directory .. "\\lib"}
 	end
 
 	for _, dir in ipairs(directories) do
@@ -353,7 +353,7 @@ local function look_for_link_libraries(directory)
 			print("    checking for " .. full_name)
 			if exists(full_name) then
 				vars.LUA_LIBDIR = dir
-				vars.LUA_LIBNAME = name
+				vars.LUALIB = name
 				print("       Found " .. name)
 				return true
 			end
@@ -634,6 +634,14 @@ local function get_possible_lua_directories()
 	return directories
 end
 
+local function strip_bin(bindir)
+	bindir = bindir:gsub("[/\\]*$", "")
+	if bindir:upper():match("[/\\]BIN") then
+		bindir = bindir:sub(1, -5):gsub("[/\\]*$", "")
+	end
+	return bindir
+end
+
 local function look_for_lua_install ()
 	print("Looking for Lua interpreter")
 	if vars.LUA_BINDIR and vars.LUA_LIBDIR and vars.LUA_INCDIR then
@@ -643,6 +651,7 @@ local function look_for_lua_install ()
 		then
 			if get_runtime() then
 				print("Runtime check completed.")
+				vars.LUA_DIR = vars.LUA_PREFIX or strip_bin(vars.LUA_BINDIR)
 				return true
 			end
 		end
@@ -869,7 +878,7 @@ if INSTALL_LUA then
 	vars.LUA_BINDIR = vars.BINDIR
 	vars.LUA_LIBDIR = vars.LIBDIR
 	vars.LUA_INCDIR = vars.INCDIR
-	vars.LUA_LIBNAME = "lua5.1.lib"
+	vars.LUALIB = "lua5.1.lib"
 	vars.LUA_RUNTIME = "MSVCR80"
 	vars.UNAME_M = "x86"
 else
@@ -929,7 +938,7 @@ Lua interpreter : $LUA
     libraries   : $LUA_LIBDIR
     includes    : $LUA_INCDIR
     architecture: $UNAME_M
-    binary link : $LUA_LIBNAME with runtime $LUA_RUNTIME.dll
+    binary link : $LUALIB with runtime $LUA_RUNTIME.dll
 ]])
 
 if USE_MINGW then

@@ -5,21 +5,21 @@ local testing_paths = test_env.testing_paths
 local write_file = test_env.write_file
 
 local extra_rocks = {
-   "/busted-2.0.0-1.rockspec",
+   "/busted-2.2.0-1.src.rock",
    "/lua_cliargs-3.0-1.src.rock",
    "/luafilesystem-${LUAFILESYSTEM}.src.rock",
-   "/luasystem-0.2.1-0.src.rock",
+   "/luasystem-0.4.5-1.src.rock",
    "/dkjson-${DKJSON}.src.rock",
-   "/say-1.3-1.rockspec",
-   "/luassert-1.8.0-0.rockspec",
-   "/lua-term-0.7-1.rockspec",
-   "/penlight-1.5.4-1.rockspec",
+   "/say-1.4.1-3.src.rock",
+   "/luassert-1.9.0-1.src.rock",
+   "/penlight-1.13.1-1.src.rock",
+   "/lua-term-0.8-1.rockspec",
    "/mediator_lua-1.1.2-0.rockspec",
 }
 
 describe("luarocks test #integration", function()
 
-   before_each(function()
+   lazy_setup(function()
       test_env.setup_specs(extra_rocks)
    end)
 
@@ -34,21 +34,6 @@ describe("luarocks test #integration", function()
    end)
 
    describe("busted backend", function()
-
-      lazy_setup(function()
-         -- Try to cache rocks from the host system to speed up test
-         for _, r in ipairs(extra_rocks) do
-            r = test_env.V(r)
-            local n, v = r:match("^/(.*)%-([^%-]+)%-%d+%.[^%-]+$")
-            os.execute("luarocks pack " .. n .. " " .. v)
-         end
-         if test_env.TEST_TARGET_OS == "windows" then
-            os.execute("move *.rock " .. testing_paths.testing_server)
-         else
-            os.execute("mv *.rock " .. testing_paths.testing_server)
-         end
-         test_env.run.luarocks_admin_nocov("make_manifest " .. testing_paths.testing_server)
-      end)
 
       it("with rockspec, installing busted", function()
          finally(function()

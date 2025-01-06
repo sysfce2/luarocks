@@ -14,7 +14,6 @@ package.loaded["luarocks.fs"] = fs
 local cfg = require("luarocks.core.cfg")
 
 local pack = table.pack or function(...) return { n = select("#", ...), ... } end
-local unpack = table.unpack or unpack
 
 math.randomseed(os.time())
 
@@ -43,32 +42,46 @@ do
       os.execute = function(cmd)
          -- redact api keys if present
          print("\nos.execute: ", (cmd:gsub("(/api/[^/]+/)([^/]+)/", function(cap, key) return cap.."<redacted>/" end)) )
-         local code = pack(old_execute(cmd))
-         print("Results: "..tostring(code.n))
-         for i = 1,code.n do
-            print("  "..tostring(i).." ("..type(code[i]).."): "..tostring(code[i]))
+         local a, b, c = old_execute(cmd)
+         if type(a) == "boolean" then
+            print((a and ".........." or "##########") .. ": " .. tostring(c) .. (b == "exit" and "" or " (" .. tostring(b) .. ")"))
+         elseif type(a) == "number" then
+            print(((a == 0) and ".........." or "##########") .. ": " .. tostring(a))
          end
-         return unpack(code, 1, code.n)
+         return a, b, c
       end
       -- luacheck: pop
    end
 end
 
 do
-   local function load_fns(fs_table, inits)
+   local skip_verbose_wrap = {
+      ["current_dir"] = true,
+   }
+
+   local function load_fns(module_name, inits)
+      local ok, fs_table = pcall(require, module_name)
+      if not ok or not type(fs_table) == "table" then
+         return
+      end
+
       for name, fn in pairs(fs_table) do
          if name ~= "init" and not fs[name] then
-            fs[name] = function(...)
-               if fs_is_verbose then
-                  local args = pack(...)
-                  for i=1, args.n do
-                     local arg = args[i]
-                     local pok, v = pcall(string.format, "%q", arg)
-                     args[i] = pok and v or tostring(arg)
+            if skip_verbose_wrap[name] then
+               fs[name] = fn
+            else
+               fs[name] = function(...)
+                  if fs_is_verbose then
+                     local args = pack(...)
+                     for i=1, args.n do
+                        local arg = args[i]
+                        local pok, v = pcall(string.format, "%q", arg)
+                        args[i] = pok and v or tostring(arg)
+                     end
+                     print("fs." .. name .. "(" .. table.concat(args, ", ") .. ")")
                   end
-                  print("fs." .. name .. "(" .. table.concat(args, ", ") .. ")")
+                  return fn(...)
                end
-               return fn(...)
             end
          end
       end
@@ -93,10 +106,7 @@ do
       end
 
       for platform in each_platform("most-specific-first") do
-         local ok, fs_plat = pcall(require, patt:format(platform))
-         if ok and fs_plat then
-            load_fns(fs_plat, inits)
-         end
+         load_fns(patt:format(platform), inits)
       end
    end
 
@@ -122,13 +132,13 @@ do
       load_platform_fns("luarocks.fs.%s", inits)
 
       -- Load platform-independent pure-Lua functionality
-      load_fns(require("luarocks.fs.lua"), inits)
+      load_fns("luarocks.fs.lua", inits)
 
       -- Load platform-specific fallbacks for missing Lua modules
       load_platform_fns("luarocks.fs.%s.tools", inits)
 
       -- Load platform-independent external tool functionality
-      load_fns(require("luarocks.fs.tools"), inits)
+      load_fns("luarocks.fs.tools", inits)
 
       -- Run platform-specific initializations after everything is loaded
       for _, init in ipairs(inits) do

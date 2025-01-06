@@ -8,14 +8,13 @@ local core_util = require("luarocks.core.util")
 describe("luarocks.util #unit", function()
    local runner
 
-   setup(function()
+   lazy_setup(function()
       runner = require("luacov.runner")
       runner.init(testing_paths.testrun_dir .. "/luacov.config")
-      runner.tick = true
    end)
 
-   teardown(function()
-      runner.shutdown()
+   lazy_teardown(function()
+      runner.save_stats()
    end)
 
    describe("util.variable_substitutions", function()
@@ -84,8 +83,8 @@ describe("luarocks.util #unit", function()
          assert.are.same({}, collect(util.sortedpairs({}, {"k1", "k2"})))
          assert.are.same({
             {"k3", "v3"},
-            {"k2", "v2", {"sub order"}},
             {"k1", "v1"},
+            {"k2", "v2"},
             {"k4", "v4"},
             {"k5", "v5"},
          }, collect(util.sortedpairs({

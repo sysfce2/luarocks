@@ -103,8 +103,8 @@ local function parse(filename)
          local value
          if var == "tmpdir" then
             value = "%{tmpdir}"
-         elseif var == "url(tmpdir)" then
-            value = "%{url(tmpdir)}"
+         elseif var == "url(%{tmpdir})" then
+            value = "%{url(%{tmpdir})}"
          elseif fn == "url" then
             value = expand_vars(fnarg)
             value = value:gsub("\\", "/")
@@ -159,6 +159,16 @@ local function parse(filename)
             cur_block = cur_op
             cur_block_name = "FILE"
             table.insert(stack, "block start")
+         elseif cmd == "FILE_CONTENTS" then
+            cur_op = {
+               op = "FILE_CONTENTS",
+               name = arg,
+               data = {},
+            }
+            table.insert(cur_test.ops, cur_op)
+            cur_block = cur_op
+            cur_block_name = "FILE_CONTENTS"
+            table.insert(stack, "block start")
          elseif cmd == "RUN" then
             local program, args = arg:match("([^ ]+)%s*(.*)$")
             if not program then
@@ -177,21 +187,35 @@ local function parse(filename)
          elseif cmd == "EXISTS" then
             cur_op = {
                op = "EXISTS",
-               file = dir.normalize(arg),
+               name = dir.normalize(arg),
                line = cur_line,
             }
             table.insert(cur_test.ops, cur_op)
          elseif cmd == "NOT_EXISTS" then
             cur_op = {
                op = "NOT_EXISTS",
-               file = dir.normalize(arg),
+               name = dir.normalize(arg),
                line = cur_line,
             }
             table.insert(cur_test.ops, cur_op)
          elseif cmd == "MKDIR" then
             cur_op = {
                op = "MKDIR",
-               file = dir.normalize(arg),
+               name = dir.normalize(arg),
+               line = cur_line,
+            }
+            table.insert(cur_test.ops, cur_op)
+         elseif cmd == "RMDIR" then
+            cur_op = {
+               op = "RMDIR",
+               name = dir.normalize(arg),
+               line = cur_line,
+            }
+            table.insert(cur_test.ops, cur_op)
+         elseif cmd == "RM" then
+            cur_op = {
+               op = "RM",
+               name = dir.normalize(arg),
                line = cur_line,
             }
             table.insert(cur_test.ops, cur_op)
@@ -221,6 +245,8 @@ local function parse(filename)
             block_start_arg("STDOUT", cur_op, "stdout")
          elseif cmd == "NOT_STDOUT" then
             block_start_arg("NOT_STDOUT", cur_op, "not_stdout")
+         elseif cmd == "PENDING" then
+            bool_arg("PENDING", cur_test, "pending", arg)
          elseif cmd == "TEST" then
             table.remove(stack)
             start_test(arg)
@@ -256,6 +282,25 @@ local function parse(filename)
    end
 
    return tests
+end
+
+local function check_output(write, block, block_name, data_var)
+   if block then
+      local is_positive = not block_name:match("NOT")
+      local err_msg = is_positive and "did not match" or "did match unwanted output"
+
+      write([=[ do ]=])
+      write([=[ local block_at = 1 ]=])
+      write([=[ local s, e, line, ok ]=])
+      for i, line in ipairs(block.data) do
+         write(([=[ line = %q ]=]):format(line))
+         write(([=[ s, e = string.find(%s, line, block_at, true) ]=]):format(data_var))
+         write(is_positive and ([=[ ok = s; if e then block_at = e + 1 end ]=]):format(i)
+                           or  ([=[ ok = not s ]=]))
+         write(([=[ assert(ok, error_message(%d, "%s %s: " .. line, %s)) ]=]):format(block.start + i, block_name, err_msg, data_var))
+      end
+      write([=[ end ]=])
+   end
 end
 
 function quick.compile(filename, env)
@@ -323,31 +368,54 @@ function quick.compile(filename, env)
       write([=[ return function() ]=])
       write([=[ test_env.run_in_tmp(function(tmpdir) ]=])
       write([=[    local function handle_tmpdir(s) ]=])
-      write([=[       return (s:gsub("%%{url%(tmpdir%)}", (tmpdir:gsub("\\", "/")))         ]=])
+      write([=[       return (s:gsub("%%{url%(%%{tmpdir}%)}", (tmpdir:gsub("\\", "/")))         ]=])
       write([=[                :gsub("%%{tmpdir}",        (tmpdir:gsub("[\\/]", dir_sep)))) ]=])
       write([=[    end ]=])
       write([=[ local ok, err ]=])
       for _, op in ipairs(t.ops) do
+         if op.name then
+            op.name = native_slash(op.name)
+            write(([=[ local name = handle_tmpdir(%q) ]=]):format(op.name))
+         end
          if op.op == "FILE" then
             if op.name:match("[\\/]") then
-               write(([=[ make_dir(%q) ]=]):format(dir.dir_name(op.name)))
+               write(([=[ make_dir(handle_tmpdir(%q)) ]=]):format(dir.dir_name(op.name)))
             end
-            write(([=[ test_env.write_file(handle_tmpdir(%q), handle_tmpdir([=====[ ]=]):format(op.name))
+            write([=[ test_env.write_file(name, handle_tmpdir([=====[ ]=])
             for _, line in ipairs(op.data) do
                write(line)
             end
             write([=[ ]=====]), finally) ]=])
          elseif op.op == "EXISTS" then
-            write(([=[ ok, err = lfs.attributes(%q) ]=]):format(op.file))
-            write(([=[ assert.truthy(ok, error_message(%d, "EXISTS failed: " .. %q .. " - " .. (err or "") )) ]=]):format(op.line, op.file))
+            write(([=[ ok, err = lfs.attributes(name) ]=]))
+            write(([=[ assert.truthy(ok, error_message(%d, "EXISTS failed: " .. name .. " - " .. (err or "") )) ]=]):format(op.line))
          elseif op.op == "NOT_EXISTS" then
-            write(([=[ assert.falsy(lfs.attributes(%q), error_message(%d, "NOT_EXISTS failed: " .. %q .. " exists" )) ]=]):format(op.file, op.line, op.file))
+            write(([=[ assert.falsy(lfs.attributes(name), error_message(%d, "NOT_EXISTS failed: " .. name .. " exists" )) ]=]):format(op.line))
          elseif op.op == "MKDIR" then
-            op.file = native_slash(op.file)
-            write(([=[ ok, err = make_dir(%q) ]=]):format(op.file))
-            write(([=[ assert.truthy((lfs.attributes(%q) or {}).mode == "directory", error_message(%d, "MKDIR failed: " .. %q .. " - " .. (err or "") )) ]=]):format(op.file, op.line, op.file))
+            write(([=[ ok, err = make_dir(name) ]=]))
+            write(([=[ assert.truthy((lfs.attributes(name) or {}).mode == "directory", error_message(%d, "MKDIR failed: " .. name .. " - " .. (err or "") )) ]=]):format(op.line))
+         elseif op.op == "RMDIR" then
+            write(([=[ ok, err = test_env.remove_dir(name) ]=]))
+            write(([=[ assert.falsy((lfs.attributes(name) or {}).mode == "directory", error_message(%d, "MKDIR failed: " .. name .. " - " .. (err or "") )) ]=]):format(op.line))
+         elseif op.op == "RM" then
+            write(([=[ ok, err = os.remove(name) ]=]))
+            write(([=[ assert.falsy((lfs.attributes(name) or {}).mode == "file", error_message(%d, "RM failed: " .. name .. " - " .. (err or "") )) ]=]):format(op.line))
+         elseif op.op == "FILE_CONTENTS" then
+            write(([=[ do ]=]))
+            write(([=[ local fd_file = assert(io.open(name, "rb")) ]=]))
+            write(([=[ local file_data = fd_file:read("*a") ]=]))
+            write(([=[ fd_file:close() ]=]))
+            write([=[ local block_at = 1 ]=])
+            write([=[ local s, e, line ]=])
+            for i, line in ipairs(op.data) do
+               write(([=[ line = %q ]=]):format(line))
+               write(([=[ s, e = string.find(file_data, line, 1, true) ]=]))
+               write(([=[ assert(s, error_message(%d, "FILE_CONTENTS " .. name .. " did not match: " .. line, file_data)) ]=]):format(op.start + i))
+               write(([=[ block_at = e + 1 ]=]):format(i))
+            end
+            write([=[ end ]=])
          elseif op.op == "RUN" then
-            local cmd_helper = cmd_helpers[op.program] or op.program
+            local cmd_helper = cmd_helpers[op.program] or ("%q"):format(op.program)
             local redirs = " 1>stdout.txt 2>stderr.txt "
             write(([=[ local ok, _, code = os.execute(%s .. " " .. %q .. %q) ]=]):format(cmd_helper, op.args, redirs))
             write([=[ if type(ok) == "number" then code = (ok >= 256 and ok / 256 or ok) end ]=])
@@ -376,53 +444,11 @@ function quick.compile(filename, env)
                write([=[ print() ]=])
             end
 
-            if op.stdout then
-               write([=[ do ]=])
-               write([=[ local block_at = 1 ]=])
-               write([=[ local s, e, line ]=])
-               for i, line in ipairs(op.stdout.data) do
-                  write(([=[ line = %q ]=]):format(line))
-                  write(([=[ s, e = string.find(stdout_data, line, 1, true) ]=]))
-                  write(([=[ assert(s, error_message(%d, "STDOUT did not match: " .. line, stdout_data)) ]=]):format(op.stdout.start + i))
-                  write(([=[ block_at = e + 1 ]=]):format(i))
-               end
-               write([=[ end ]=])
-            end
+            check_output(write, op.stdout, "STDOUT", "stdout_data")
+            check_output(write, op.stderr, "STDERR", "stderr_data")
 
-            if op.not_stdout then
-               write([=[ do ]=])
-               write([=[ local line ]=])
-               for i, line in ipairs(op.not_stdout.data) do
-                  write(([=[ line = %q ]=]):format(line))
-                  write(([=[ s = string.find(stdout_data, line, 1, true) ]=]))
-                  write(([=[ assert(not s, error_message(%d, "NOT_STDOUT did match unwanted output: " .. line, stdout_data)) ]=]):format(op.stdout.start + i))
-               end
-               write([=[ end ]=])
-            end
-
-            if op.stderr then
-               write([=[ do ]=])
-               write([=[ local block_at = 1 ]=])
-               write([=[ local s, e, line ]=])
-               for i, line in ipairs(op.stderr.data) do
-                  write(([=[ line = %q ]=]):format(line))
-                  write(([=[ s, e = string.find(stderr_data, line, block_at, true) ]=]))
-                  write(([=[ assert(s, error_message(%d, "STDERR did not match: " .. line, stderr_data)) ]=]):format(op.stderr.start + i))
-                  write(([=[ block_at = e + 1 ]=]):format(i))
-               end
-               write([=[ end ]=])
-            end
-
-            if op.not_stderr then
-               write([=[ do ]=])
-               write([=[ local line ]=])
-               for i, line in ipairs(op.not_stderr.data) do
-                  write(([=[ line = %q ]=]):format(line))
-                  write(([=[ s = string.find(stderr_data, line, block_at, true) ]=]))
-                  write(([=[ assert(not s, error_message(%d, "NOT_STDERR did match unwanted output: " .. line, stderr_data)) ]=]):format(op.stderr.start + i))
-               end
-               write([=[ end ]=])
-            end
+            check_output(write, op.not_stdout, "NOT_STDOUT", "stdout_data")
+            check_output(write, op.not_stderr, "NOT_STDERR", "stderr_data")
 
             if op.exit then
                write(([=[ assert.same(%d, code, error_message(%d, "EXIT did not match: " .. %d, stderr_data)) ]=]):format(op.exit, op.exit_line, op.exit))

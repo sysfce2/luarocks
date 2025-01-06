@@ -32,7 +32,6 @@ describe("LuaRocks build #unit", function()
    lazy_setup(function()
       runner = require("luacov.runner")
       runner.init(testing_paths.testrun_dir .. "/luacov.config")
-      runner.tick = true
       cfg.init()
       fs.init()
       deps.check_lua_incdir(cfg.variables)
@@ -40,7 +39,7 @@ describe("LuaRocks build #unit", function()
    end)
 
    lazy_teardown(function()
-      runner.shutdown()
+      runner.save_stats()
    end)
 
    describe("build.builtin", function()
@@ -129,15 +128,15 @@ describe("LuaRocks build #unit", function()
 
             local modules = build_builtin.autodetect_modules(libs, incdirs, libdirs)
             assert.same(modules, {
-               module1 = location .. "/module1.lua",
+               module1 = P(location .. "/module1.lua"),
                ["dir1.module2"] = {
-                  sources = location .. "/dir1/module2.c",
+                  sources = P(location .. "/dir1/module2.c"),
                   libraries = libs,
                   incdirs = incdirs,
                   libdirs = libdirs
                },
                my_module = {
-                  sources = location .. "/dir1/dir2/module3.c",
+                  sources = P(location .. "/dir1/dir2/module3.c"),
                   libraries = libs,
                   incdirs = incdirs,
                   libdirs = libdirs
@@ -308,10 +307,13 @@ describe("LuaRocks build #unit", function()
                else
                   os.execute("cl " .. fdir .. "\\fixturedep.c /link /export:fixturedep_fn /out:" .. fdir .. "\\fixturedep.dll /implib:" .. fdir .. "\\fixturedep.lib")
                end
+               finally(function() os.remove(fdir .. "\\libfixturedep.dll") end)
             elseif test_env.TEST_TARGET_OS == "linux" then
                os.execute("gcc -shared -o " .. fdir .. "/libfixturedep.so " .. fdir .. "/fixturedep.c")
+               finally(function() os.remove(fdir .. "/libfixturedep.so") end)
             elseif test_env.TEST_TARGET_OS == "osx" then
                os.execute("cc -dynamiclib -o " .. fdir .. "/libfixturedep.dylib " .. fdir .. "/fixturedep.c")
+               finally(function() os.remove(fdir .. "/libfixturedep.dylib") end)
             end
 
             local rockspec = {
